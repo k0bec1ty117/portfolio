@@ -1,0 +1,244 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>IoT x ML</title>
+    <script type="text/javascript" src="microbit_setting.js"></script>
+    <script type="text/javascript" src="smoothie.js"></script>
+</head>
+
+<body>
+    <div id="text1">Hello!</div>
+    <button id="startNotifications">START NOTIFY</button>
+    <button id="stopNotifications">STOP NOTIFY</button>
+    <select id="gesture">
+        <option value="0">立ち</option>
+        <option value="1">歩行</option>
+        <option value="2">座る</option>
+        <option value="3">キー入力</option>
+        <option value="4">バイバイ</option>
+        <option value="5">腕組み</option>
+        <option value="6">ガッツポーズ</option>
+        <option value="7">後頭部をかく</option>
+        <option value="8">サムズアップ</option>
+    </select>
+    <input type="checkbox" id="isTraining">Training
+    <p><canvas id="chart" width="500" height="200"></canvas></p>
+    <p><textarea id="textarea1" rows="20" cols="40"></textarea></p>
+    <p><button id="download">Download</button></p>
+    <script>
+        //--------------------------------------------------
+        //Global
+        //--------------------------------------------------
+        //backend側のurl
+        const url_data = "http://127.0.0.1:5001/";
+
+        //MicrobitSettingのインスタンス生成
+        const ble = new MicrobitSetting();
+
+        //TimeSeriesのインスタンス生成
+        const ble_data1 = new TimeSeries();
+        const ble_data2 = new TimeSeries();
+        const ble_data3 = new TimeSeries();
+
+        //推論データ用に必要な変数
+        let predict_data_x = [];
+        let predict_data_y = [];
+        let predict_data_z = [];
+        let predict_data_count = 0;
+
+        //smoothie.js
+        const createTimeline = function () {
+            const chart = new SmoothieChart({
+                millisPerPixel: 20,
+                grid: {
+                    fillStyle: "#ff8319",
+                    strokeStyle: "#ffffff",
+                    millisPerLine: 800
+                },
+                maxValue: 3,
+                minValue: -3
+            });
+            chart.addTimeSeries(ble_data1, {
+                strokeStyle: "rgba(255, 255, 255, 1)",
+                fillStyle: "rgba(255, 255, 255, 0.2)",
+                lineWidth: 4
+            });
+            chart.addTimeSeries(ble_data2, {
+                strokeStyle: "rgba(255, 255, 0, 1)",
+                fillStyle: "rgba(255, 255, 255, 0.2)",
+                lineWidth: 4
+            });
+            chart.addTimeSeries(ble_data3, {
+                strokeStyle: "rgba(255, 0, 255, 1)",
+                fillStyle: "rgba(255, 255, 255, 0.2)",
+                lineWidth: 4
+            });
+            chart.streamTo(document.getElementById("chart"), 500);
+        };
+
+        //ファイルダウンロード
+        const file_download = function (filename, data_text) {
+            event.preventDefault();
+            const blob = new Blob([data_text], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            document.body.appendChild(a);
+            a.download = filename;
+            a.href = url;
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        };
+
+        //平均値
+        const average = function (data) {
+            let sum = 0;
+            for (i = 0; i < data.length; i++) {
+                sum = sum + data[i];
+            }
+            return (sum / data.length);
+        };
+
+        //分散値
+        const variance = function (data) {
+            // 平均値を求める
+            const ave = average(data);
+
+            //分散
+            let varia = 0;
+            for (i = 0; i < data.length; i++) {
+                varia = varia + Math.pow(data[i] - ave, 2);
+            }
+            return (varia / data.length);
+        };
+
+        //標準偏差値
+        const standard_deviation = function (data) {
+            //分散を求める
+            const varia = variance(data);
+
+            //分散の平方根
+            return Math.sqrt(varia);
+        };
+
+        //GET送信
+        const get_flask = function (predict_data) {
+            fetch(url_data + "predict?" + predict_data, {
+                method: "GET"
+            })
+            .then(response => {
+                return response.json();
+            })
+            .then(data => {
+                console.log(data);
+
+                //ジェスチャー推論結果を文字列表示
+                gesture_text = document.getElementById("gesture").options[data["out"]].text;
+                document.getElementById("text1").innerHTML = gesture_text;
+            })
+            .catch(error => {
+                console.log(error);
+            });
+        };
+
+        //POST送信
+        const post_flask = function (post_data) {
+            fetch(url_data + "training", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8" },
+                body: "data=" + post_data
+            })
+            .then(response => {
+                return response.json();
+            })
+            .then(data => {
+                console.log(data);
+            })
+            .catch(error => {
+                console.log(error);
+            });
+        };
+
+        //--------------------------------------------------
+        //onLoad
+        //--------------------------------------------------
+        window.onload = function () {
+            ble.setUUID("UUID1", MicrobitSetting.MICROBIT_ACCELEROMETER_SERVICE, MicrobitSetting.MICROBIT_ACCELEROMETER_DATA);
+
+            //smoothie.js 実行
+            createTimeline();
+        };
+
+        //--------------------------------------------------
+        //Event
+        //--------------------------------------------------
+        //start notify ボタンクリック
+        document.getElementById("startNotifications").onclick = function () {
+            ble.startNotify("UUID1");
+
+            //データをクリア
+            document.getElementById("textarea1").value = "";            
+        };
+
+        //stop notify ボタンクリック
+        document.getElementById("stopNotifications").onclick = function () {
+            ble.stopNotify("UUID1");
+
+            //データを送信
+            post_flask(document.getElementById("textarea1").value);
+        };
+
+        //Download ボタンクリック
+        document.getElementById("download").onclick = function () {
+            const filename = "microbit_data.csv";
+            const data_text = document.getElementById("textarea1").value;
+            file_download(filename, data_text);
+        };
+
+        //onRead
+        ble.onRead = function (data, uuid) {
+            //リトルエンディアンで受け取り、1000で割る
+            const value_x = data.getInt16(0, true) / 1000;
+            const value_y = data.getInt16(2, true) / 1000;
+            const value_z = data.getInt16(4, true) / 1000;
+
+            //チェックがあるときのみテキストエリアにデータ追記
+            if (document.getElementById("isTraining").checked) {
+                const label = document.getElementById("gesture").value;
+                const add_data = value_x + ", " + value_y + ", " + value_z + ", " + label + "\n";
+                document.getElementById("textarea1").value = document.getElementById("textarea1").value + add_data;
+            }
+
+            //グラフへ反映
+            ble_data1.append(new Date().getTime(), value_x);
+            ble_data2.append(new Date().getTime(), value_y);
+            ble_data3.append(new Date().getTime(), value_z);
+
+            //predict用データ作成
+            predict_data_x[predict_data_count] = value_x;
+            predict_data_y[predict_data_count] = value_y;
+            predict_data_z[predict_data_count] = value_z;
+            predict_data_count++;
+
+            //平均と標準偏差
+            if (predict_data_count >= 50) {
+                predict_data_count = 0;
+                mean_x = average(predict_data_x);
+                mean_y = average(predict_data_y);
+                mean_z = average(predict_data_z);
+                std_x = standard_deviation(predict_data_x);
+                std_y = standard_deviation(predict_data_y);
+                std_z = standard_deviation(predict_data_z);
+
+                //データ送信
+                predict_data = "mean_x=" + mean_x + "&mean_y=" + mean_y + "&mean_z=" + mean_z + "&std_x=" + std_x + "&std_y=" + std_y + "&std_z=" + std_z;
+                get_flask(predict_data);
+                console.log(predict_data);
+            }
+        };
+    </script>
+</body>
+
+</html>
