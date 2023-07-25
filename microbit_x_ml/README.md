@@ -1,4 +1,4 @@
-# microbit_x_ml
+# micro:bit_x_ml
 
 ## 概要
 
