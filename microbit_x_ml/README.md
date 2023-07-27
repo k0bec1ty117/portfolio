@@ -4,7 +4,7 @@
 
 人がジェスチャーを行うとリアルタイムに推論するシステム
 
-`実稼働画面をキャプチャー`
+![image](https://github.com/k0bec1ty117/portfolio/assets/89716609/75926a03-3b63-4a1b-9dff-bd736b86de81)
 
 ### 学習時
 
